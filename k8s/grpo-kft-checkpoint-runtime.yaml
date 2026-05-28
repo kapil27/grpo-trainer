@@ -1,0 +1,41 @@
+# Cluster-scoped training runtime with shared checkpoint PVC mounted on every train pod.
+#
+#   oc apply -f k8s/grpo-kft-checkpoint-runtime.yaml
+#   oc get clustertrainingruntime grpo-torch-checkpoint
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: grpo-torch-checkpoint
+  labels:
+    trainer.kubeflow.org/framework: torch
+spec:
+  mlPolicy:
+    numNodes: 1
+    torch:
+      numProcPerNode: auto
+  template:
+    metadata: {}
+    spec:
+      replicatedJobs:
+        - groupName: default
+          name: node
+          replicas: 1
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                metadata: {}
+                spec:
+                  containers:
+                    - image: registry.redhat.io/rhoai/odh-training-cuda128-torch29-py312-rhel9@sha256:ab9dded4ff93d182ceb09ed697a82b67aa12d9c6d04c01602cf6ec43feee012c
+                      name: node
+                      resources: {}
+                      volumeMounts:
+                        - name: shared-checkpoint
+                          mountPath: /mnt/checkpoint
+                  volumes:
+                    - name: shared-checkpoint
+                      persistentVolumeClaim:
+                        claimName: grpo-shared-checkpoint

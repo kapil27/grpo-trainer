@@ -1,0 +1,124 @@
+# vLLM rollout for GRPO weight sync (3 GPUs: inference on GPU 0, training/sync on 1-2).
+#
+# Prerequisites:
+#   oc apply -f k8s/grpo-shared-checkpoint-pvc.yaml   # optional but required for PVC sync flow
+#   oc apply -f k8s/vllm-rollout-manager-rbac.yaml    # if deploying from workbench
+#
+# Apply:
+#   oc apply -f k8s/grpo-vllm-rollout.yaml
+# Verify:
+#   oc rollout status deployment/grpo-vllm-rollout -n grpoxtrainer
+#   oc exec deploy/grpo-vllm-rollout -n grpoxtrainer -- curl -sf http://localhost:8000/health
+#
+# Image: stock vLLM (validated on sridhartest). On FIPS clusters use a RHEL/UBI-based build instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grpo-vllm-rollout
+  namespace: grpoxtrainer
+  labels:
+    app: grpo-vllm-rollout
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grpo-vllm-rollout
+  template:
+    metadata:
+      labels:
+        app: grpo-vllm-rollout
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+            - Qwen/Qwen2.5-0.5B-Instruct
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --gpu-memory-utilization
+            - "0.4"
+            - --max-model-len
+            - "4096"
+            - --enforce-eager
+            - --load-format
+            - auto
+            - --weight-transfer-config
+            - '{"backend": "nccl"}'
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: HF_TOKEN
+              value: ""
+            - name: HOME
+              value: /tmp/vllm-home
+            - name: HF_HOME
+              value: /tmp/hf-cache
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /tmp/hf-cache
+            - name: TRANSFORMERS_CACHE
+              value: /tmp/hf-cache
+            - name: XDG_CACHE_HOME
+              value: /tmp
+            - name: VLLM_CACHE_ROOT
+              value: /tmp/vllm-cache
+            - name: VLLM_CONFIG_ROOT
+              value: /tmp/vllm-config
+            - name: FLASHINFER_WORKSPACE_DIR
+              value: /tmp/flashinfer-cache
+            - name: VLLM_SERVER_DEV_MODE
+              value: "1"
+            - name: VLLM_ALLOW_INSECURE_SERIALIZATION
+              value: "1"
+          resources:
+            requests:
+              cpu: "4"
+              memory: 24Gi
+              nvidia.com/gpu: "3"
+            limits:
+              cpu: "4"
+              memory: 24Gi
+              nvidia.com/gpu: "3"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            - name: vllm-home
+              mountPath: /tmp/vllm-home
+            - name: flashinfer-cache
+              mountPath: /tmp/flashinfer-cache
+            - name: shared-checkpoint
+              mountPath: /mnt/checkpoint
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          emptyDir: {}
+        - name: vllm-home
+          emptyDir: {}
+        - name: flashinfer-cache
+          emptyDir: {}
+        - name: shared-checkpoint
+          persistentVolumeClaim:
+            claimName: grpo-shared-checkpoint
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpo-vllm-rollout
+  namespace: grpoxtrainer
+  labels:
+    app: grpo-vllm-rollout
+spec:
+  type: ClusterIP
+  selector:
+    app: grpo-vllm-rollout
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

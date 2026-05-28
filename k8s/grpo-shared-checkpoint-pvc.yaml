@@ -1,0 +1,19 @@
+# Shared checkpoint volume for multi-node training + vLLM weight sync.
+# Requires a ReadWriteMany StorageClass (e.g. nfs on sridhartest cluster).
+#
+# Apply:
+#   oc apply -f k8s/grpo-shared-checkpoint-pvc.yaml
+# Verify:
+#   oc get pvc grpo-shared-checkpoint -n grpoxtrainer
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grpo-shared-checkpoint
+  namespace: grpoxtrainer
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 10Gi
